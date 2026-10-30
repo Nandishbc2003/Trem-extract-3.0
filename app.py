@@ -7,6 +7,7 @@ import os
 import re
 import tempfile
 import traceback
+import subprocess
 import openpyxl
 import streamlit as st
 import pandas as pd
@@ -16,20 +17,39 @@ from openpyxl.utils import get_column_letter
 import nodriver as uc
 import nest_asyncio
 
-# --- FIX: ONLY APPLY NEST_ASYNCIO IF AN EVENT LOOP IS ALREADY RUNNING ---
-# This prevents a crash on Streamlit Cloud (Python 3.14+)
+# --- FIX: ONLY APPLY NEST_ASYNCIO IF AN EVENT LOOP IS RUNNING ---
 try:
     loop = asyncio.get_running_loop()
     nest_asyncio.apply()
 except RuntimeError:
-    pass  # No running loop, so we don't need nest_asyncio
+    pass
 
-# Ensure DISPLAY is set for the virtual screen (Xvfb)
-if 'DISPLAY' not in os.environ:
+INTER_REQUEST_DELAY_SECONDS = 2
+
+# --- ENVIRONMENT SETUP (CHROME + XVFB) ---
+@st.cache_resource(show_spinner=False)
+def setup_environment():
+    """Downloads Chrome and starts Xvfb directly in Streamlit Cloud."""
+    st.info("⚙️ Initializing Virtual Display and Chrome... This happens only once.")
+    
+    # 1. Start Xvfb (Virtual Display)
+    if not os.path.exists("/tmp/.X99-lock"):
+        subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1920x1080x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.environ['DISPLAY'] = ':99'
 
-CHROME_PATH = "/usr/bin/google-chrome"
-INTER_REQUEST_DELAY_SECONDS = 2
+    # 2. Download and Extract Google Chrome (No root required)
+    chrome_dir = "/tmp/chrome"
+    chrome_bin = os.path.join(chrome_dir, "opt/google/chrome/google-chrome")
+    
+    if not os.path.exists(chrome_bin):
+        os.system("wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb")
+        os.system(f"dpkg -x /tmp/chrome.deb {chrome_dir}")
+        os.system("rm /tmp/chrome.deb")
+        
+    return chrome_bin
+
+# Run the setup once
+CHROME_PATH = setup_environment()
 
 # --- SESSION STATE INITIALIZATION ---
 if "targets" not in st.session_state: st.session_state.targets = None          
@@ -96,17 +116,17 @@ async def process_one_url(driver, url):
     except Exception:
         raise Exception("DriverDead")
 
-async def start_browser():
+async def start_browser(executable_path):
     return await uc.start(
-        browser_executable_path=CHROME_PATH,
+        browser_executable_path=executable_path,
         headless=False, 
         browser_args=["--window-size=1920,1080", "--no-sandbox", "--disable-dev-shm-usage"]
     )
 
-async def run_processor(targets, progress_callback):
+async def run_processor(targets, progress_callback, chrome_path):
     results = []
     total = len(targets)
-    driver = await start_browser()
+    driver = await start_browser(chrome_path)
     
     try:
         for idx, target in enumerate(targets, 1):
@@ -124,7 +144,7 @@ async def run_processor(targets, progress_callback):
                 try: driver.stop()
                 except: pass
                 await asyncio.sleep(2)
-                driver = await start_browser()
+                driver = await start_browser(chrome_path)
                 try: balance, status = await process_one_url(driver, url)
                 except: balance, status = None, "Crash Retry Failed"
 
@@ -287,17 +307,25 @@ if uploaded_file is not None:
                 progress_bar.progress(current / total)
                 status_text.text(f"Processing {current}/{total}: {reward_id[:30]}...")
 
+            # FIX: Initialize results to prevent NameError if browser crashes entirely
+            results = [] 
+            
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                results = loop.run_until_complete(run_processor(targets, progress_callback))
+                results = loop.run_until_complete(run_processor(targets, progress_callback, CHROME_PATH))
             except Exception as e:
                 st.error(f"❌ An error occurred: {e}\n\n{traceback.format_exc()}")
             finally:
                 loop.close()
 
-            st.session_state.results = results
-            st.session_state.processing_complete = True
+            # Only update state if we actually got results
+            if results:
+                st.session_state.results = results
+                st.session_state.processing_complete = True
+            else:
+                st.error("The browser failed to launch or returned no results.")
+
             progress_bar.empty()
             status_text.empty()
             st.rerun()
