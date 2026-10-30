@@ -1,0 +1,13 @@
+Google colab
+https://colab.research.google.com/drive/1bXXN9tV6fmk3vKvwh7Fig_TN_Sqm6XXn?usp=sharing
+
+Run and execute online with google colab
+
+Streamlit Cloud
+https://balance-extracter-trem-chc45qgcrxugnnrz9xss5p.streamlit.app/
+
+Trem-2.0
+https://colab.research.google.com/drive/1rHH6fgUc8fgUVAC1G5ohn0BFven_83tL?usp=sharing
+
+Streamlit Cloud-trem-2.0
+https://trem-extractor-2-0-build-nbc-innvovative-unit-13.streamlit.app/
