@@ -16,8 +16,13 @@ from openpyxl.utils import get_column_letter
 import nodriver as uc
 import nest_asyncio
 
-# Apply nest_asyncio for Streamlit's async environment
-nest_asyncio.apply()
+# --- FIX: ONLY APPLY NEST_ASYNCIO IF AN EVENT LOOP IS ALREADY RUNNING ---
+# This prevents a crash on Streamlit Cloud (Python 3.14+)
+try:
+    loop = asyncio.get_running_loop()
+    nest_asyncio.apply()
+except RuntimeError:
+    pass  # No running loop, so we don't need nest_asyncio
 
 # Ensure DISPLAY is set for the virtual screen (Xvfb)
 if 'DISPLAY' not in os.environ:
